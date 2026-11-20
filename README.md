@@ -2,10 +2,22 @@
 
 A Raycast/Linear-inspired task, deadline, and reminder manager for **KDE Plasma 6**, backed by a lightweight SQLite WAL daemon and a terminal CLI.
 
+## Screenshots
+
+### Panel Pill
+
+![TaskFlow Panel Pill](docs/screenshots/panel-pill.png)
+
+### Popout Views
+
+| Dashboard & Subtasks | Smart Task Form | Dual Jalali & Gregorian Calendar |
+| :---: | :---: | :---: |
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Task Form](docs/screenshots/task-form.png) | ![Calendar](docs/screenshots/calendar.png) |
+
 ## Features
 
 - **Smart Panel Pill**: 3-part compact panel widget showing the top priority/focus task, live urgency/deadline context badge, active counter, and mouse-wheel task cycling.
-- **Bento Popout Dashboard**: Filterable task list (`Active`, `Today`, `Done`, `All`), tag filtering, instant search, drag-and-drop manual reordering (preserving task priority), double-click inline editing, and inline priority picker.
+- **Bento Popout Dashboard**: Filterable task list (`Active`, `Today`, `Done`, `All`), tag filtering, instant search, drag-and-drop manual reordering with wheel-scroll support (preserving task priority), double-click editing, and inline priority picker.
 - **Smart Form & Keyboard Navigation**: Full `Tab` / `Shift+Tab` / `Enter` workflow with `#tag` autocomplete, quick deadline presets, recurring schedules, time estimates, and subtasks.
 - **Dual Jalali & Gregorian Calendar**: Interactive month grid with per-day task indicators and Jalali/Gregorian toggle.
 - **Desktop Notifications**: Background reminder daemon using `notify-send` with snooze/complete actions.
