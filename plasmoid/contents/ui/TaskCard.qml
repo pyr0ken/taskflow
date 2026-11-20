@@ -11,6 +11,11 @@ Rectangle {
     property var listViewRef: null
 
     readonly property bool isDragged: (app && app.dragSourceIndex === itemIndex && dragArea.drag.active)
+    ListView.delayRemove: isDragged
+
+    function syncDragTarget() {
+        dragArea.syncTargetFromPointer();
+    }
     readonly property int shiftStep: (app ? app.dragCardHeight : 0) + (listViewRef ? listViewRef.spacing : 10)
     readonly property real targetShiftY: {
         if (!app || app.dragSourceIndex === -1 || itemIndex === app.dragSourceIndex || taskData.completed) return 0;
@@ -92,6 +97,7 @@ Rectangle {
                 app.dragSourceIndex = taskCard.itemIndex;
                 app.dragTargetIndex = taskCard.itemIndex;
                 app.dragCardHeight = taskCard.height;
+                app.draggedCardItem = taskCard;
                 syncTargetFromPointer();
             } else {
                 syncTargetFromPointer();
@@ -100,6 +106,7 @@ Rectangle {
                 app.dragSourceIndex = -1;
                 app.dragTargetIndex = -1;
                 app.dragCardHeight = 0;
+                if (app.draggedCardItem === taskCard) app.draggedCardItem = null;
                 taskCard.y = startY;
                 if (fromIdx !== -1 && toIdx !== -1 && fromIdx !== toIdx && listViewRef) {
                     var lv = listViewRef;

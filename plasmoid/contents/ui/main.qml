@@ -42,6 +42,7 @@ PlasmoidItem {
     property int dragSourceIndex: -1
     property int dragTargetIndex: -1
     property real dragCardHeight: 0
+    property Item draggedCardItem: null
 
     // Inline Priority Picker Menu state
     property Item fullRootItem: null
@@ -1096,6 +1097,35 @@ PlasmoidItem {
                     clip: true
                     spacing: 10
                     interactive: root.dragSourceIndex === -1
+                    cacheBuffer: root.dragSourceIndex !== -1 ? Math.max(4000, contentHeight) : 320
+
+                    function scrollDuringDrag(angleDeltaY) {
+                        if (root.dragSourceIndex === -1 || !angleDeltaY) return;
+                        var maxY = Math.max(0, taskListView.contentHeight - taskListView.height);
+                        if (maxY <= 0) return;
+                        var oldY = taskListView.contentY;
+                        var newY = Math.max(0, Math.min(maxY, oldY - angleDeltaY * 0.45));
+                        var delta = newY - oldY;
+                        if (Math.abs(delta) < 0.5) return;
+                        taskListView.contentY = newY;
+                        if (root.draggedCardItem) {
+                            var minCardY = -Math.round(root.draggedCardItem.height * 0.4);
+                            var maxCardY = Math.max(0, taskListView.contentHeight - Math.round(root.draggedCardItem.height * 0.6));
+                            root.draggedCardItem.y = Math.max(minCardY, Math.min(maxCardY, root.draggedCardItem.y + delta));
+                            if (root.draggedCardItem.syncDragTarget) {
+                                root.draggedCardItem.syncDragTarget();
+                            }
+                        }
+                    }
+
+                    WheelHandler {
+                        id: dragScrollWheel
+                        enabled: root.dragSourceIndex !== -1
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        onWheel: (event) => {
+                            taskListView.scrollDuringDrag(event.angleDelta.y);
+                        }
+                    }
 
                     function updateDragTarget(cardIndex, cursorY, cardY, cardHeight) {
                         var modelArr = taskListView.model;
