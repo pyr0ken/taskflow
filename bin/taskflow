@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+"""
+TaskFlow CLI client
+Manage tasks, deadlines (Jalali/Gregorian/relative), subtasks, and reminders from the terminal.
+"""
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+API_BASE = "http://127.0.0.1:28490"
+
+USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+C_RESET = "\033[0m" if USE_COLOR else ""
+C_BOLD = "\033[1m" if USE_COLOR else ""
+C_DIM = "\033[2m" if USE_COLOR else ""
+C_RED = "\033[31m" if USE_COLOR else ""
+C_ORANGE = "\033[33m" if USE_COLOR else ""
+C_BLUE = "\033[34m" if USE_COLOR else ""
+C_GREEN = "\033[32m" if USE_COLOR else ""
+C_CYAN = "\033[36m" if USE_COLOR else ""
+
+PRIO_COLORS = {1: C_RED, 2: C_ORANGE, 3: C_BLUE, 4: C_DIM}
+
+
+def request(endpoint, method="GET", data=None):
+    url = f"{API_BASE}{endpoint}"
+    req = urllib.request.Request(url, method=method)
+    req.add_header("Content-Type", "application/json")
+    body = json.dumps(data).encode("utf-8") if data is not None else None
+    try:
+        with urllib.request.urlopen(req, data=body, timeout=5) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            err = json.loads(raw).get("error", raw)
+        except Exception:
+            err = raw
+        print(f"{C_RED}Error ({e.code}): {err}{C_RESET}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"{C_RED}Error connecting to TaskFlow daemon: {e}{C_RESET}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_list(args):
+    params = {"filter": args.filter, "sort": args.sort}
+    if args.tag:
+        params["tag"] = args.tag
+    qs = urllib.parse.urlencode(params)
+    tasks = request(f"/tasks?{qs}")
+    if not tasks:
+        print(f"{C_DIM}No tasks found.{C_RESET}")
+        return
+
+    print(
+        f"\n{C_BOLD}{'ID':<4} {'PRIO':<8} {'DUE / COUNTDOWN':<30} {'TAG':<12} {'TITLE'}{C_RESET}"
+    )
+    print("─" * 84)
+    for t in tasks:
+        p_col = PRIO_COLORS.get(t["priority"], "")
+        prio = f"{p_col}{t['priority_name']:<8}{C_RESET}"
+        status = f"{C_GREEN}✔{C_RESET}" if t["completed"] else "○"
+        due_str = t["due_human"]
+        if args.jalali and t.get("due_jalali"):
+            due_str = f"{t['due_jalali']} ({t['due_rel']})"
+        if t["is_overdue"] and not t["completed"]:
+            due_disp = f"{C_RED}{due_str:<30}{C_RESET}"
+        else:
+            due_disp = f"{due_str:<30}"
+
+        tag_disp = f"#{t['tag']}" if t["tag"] else "-"
+        sub_str = (
+            f" {C_CYAN}[{t['subtasks_done']}/{t['subtasks_count']}]{C_RESET}"
+            if t["subtasks_count"] > 0
+            else ""
+        )
+        rep_str = f" {C_DIM}↻{t['recurrence']}{C_RESET}" if t.get("recurrence") else ""
+        print(
+            f"{t['id']:<4} {prio} {due_disp} {tag_disp:<12} {status} {t['title']}{sub_str}{rep_str}"
+        )
+    print()
+
+
+def cmd_add(args):
+    payload = {
+        "title": args.title,
+        "due_date": args.due or "",
+        "priority": args.priority,
+        "tag": args.tag or "",
+        "estimate": args.estimate or "",
+        "notes": args.notes or "",
+        "recurrence": args.repeat or "",
+        "subtasks": args.subtasks or [],
+    }
+    res = request("/tasks", method="POST", data=payload)
+    due_note = f" (due {res['due_date']})" if res.get("due_date") else ""
+    print(f"{C_GREEN}✔{C_RESET} Task #{res.get('id')} created: {args.title}{due_note}")
+
+
+def cmd_edit(args):
+    payload = {"id": args.id}
+    if args.title is not None:
+        payload["title"] = args.title
+    if args.due is not None:
+        payload["due_date"] = args.due
+    if args.priority is not None:
+        payload["priority"] = args.priority
+    if args.tag is not None:
+        payload["tag"] = args.tag
+    if args.estimate is not None:
+        payload["estimate"] = args.estimate
+    if args.notes is not None:
+        payload["notes"] = args.notes
+    if args.repeat is not None:
+        payload["recurrence"] = "" if args.repeat == "none" else args.repeat
+
+    res = request("/tasks/update", method="POST", data=payload)
+    print(f"{C_GREEN}✔{C_RESET} Task #{res.get('id')} updated.")
+
+
+def cmd_snooze(args):
+    target = args.duration.strip().lower()
+    if target in ("1h", "3h", "tomorrow"):
+        payload = {"id": args.id, "preset": target}
+    else:
+        if target.endswith("h"):
+            minutes = int(target[:-1]) * 60
+        elif target.endswith("m"):
+            minutes = int(target[:-1])
+        else:
+            minutes = int(target)
+        payload = {"id": args.id, "minutes": minutes}
+
+    res = request("/tasks/snooze", method="POST", data=payload)
+    print(f"{C_GREEN}✔{C_RESET} Task #{args.id} snoozed to {res.get('due_date')}.")
+
+
+def cmd_done(args):
+    res = request("/tasks/toggle", method="POST", data={"id": args.id})
+    state = "completed" if res.get("completed") == 1 else "re-opened"
+    msg = f"{C_GREEN}✔{C_RESET} Task #{args.id} {state}."
+    if res.get("next_id"):
+        msg += f" Next recurring instance created (#{res['next_id']})."
+    print(msg)
+
+
+def cmd_del(args):
+    request("/tasks/delete", method="POST", data={"id": args.id})
+    print(f"{C_GREEN}✔{C_RESET} Task #{args.id} deleted.")
+
+
+def cmd_clear(args):
+    res = request("/tasks/clear-completed", method="POST", data={})
+    print(f"{C_GREEN}✔{C_RESET} Cleared {res.get('deleted', 0)} completed task(s).")
+
+
+def cmd_stats(args):
+    s = request("/stats")
+    print(f"\n{C_BOLD}TaskFlow Summary{C_RESET}")
+    print(f"  Pending:   {s['pending_count']}")
+    print(f"  Today:     {s['today_count']}")
+    print(f"  Overdue:   {C_RED if s['overdue_count'] > 0 else C_GREEN}{s['overdue_count']}{C_RESET}")
+    print(f"  Completed: {s['completed_count']}")
+    if s.get("next_task"):
+        nt = s["next_task"]
+        print(f"  Next due:  #{nt['id']} {nt['title']} — {nt['due_human']}")
+    print()
+
+
+def cmd_sub(args):
+    if args.sub_cmd == "add":
+        res = request("/subtasks/add", method="POST", data={"task_id": args.id, "title": args.title})
+        print(f"{C_GREEN}✔{C_RESET} Subtask #{res.get('id')} added to task #{args.id}.")
+    elif args.sub_cmd == "toggle":
+        res = request("/subtasks/toggle", method="POST", data={"id": args.id})
+        state = "done" if res.get("completed") == 1 else "open"
+        print(f"{C_GREEN}✔{C_RESET} Subtask #{args.id} marked {state}.")
+    elif args.sub_cmd == "del":
+        request("/subtasks/delete", method="POST", data={"id": args.id})
+        print(f"{C_GREEN}✔{C_RESET} Subtask #{args.id} deleted.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="TaskFlow CLI - KDE Plasma Task Manager")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # List
+    p_list = subparsers.add_parser("list", aliases=["ls"], help="List tasks")
+    p_list.add_argument(
+        "--filter",
+        choices=["all", "active", "today", "upcoming", "completed"],
+        default="active",
+    )
+    p_list.add_argument("--tag", help="Filter by tag")
+    p_list.add_argument("--sort", choices=["priority", "due", "created"], default="priority")
+    p_list.add_argument("--jalali", "-j", action="store_true", help="Show Jalali due dates")
+
+    # Add
+    p_add = subparsers.add_parser("add", help="Add a new task")
+    p_add.add_argument("title", help="Task title")
+    p_add.add_argument(
+        "--due",
+        help="Due datetime (Gregorian, Jalali '1405-09-01 18:00', '+2h', 'tomorrow 10:00')",
+    )
+    p_add.add_argument(
+        "--priority",
+        type=int,
+        choices=[1, 2, 3, 4],
+        default=3,
+        help="1: Urgent, 2: High, 3: Medium, 4: Low",
+    )
+    p_add.add_argument("--tag", help="Tag or project name")
+    p_add.add_argument("--estimate", help="Estimated time (e.g. 30m, 2h)")
+    p_add.add_argument("--notes", help="Optional task notes")
+    p_add.add_argument("--repeat", choices=["daily", "weekly", "monthly"], help="Recurrence")
+    p_add.add_argument("--subtask", "-s", dest="subtasks", action="append", help="Add subtask item")
+
+    # Edit
+    p_edit = subparsers.add_parser("edit", help="Edit an existing task")
+    p_edit.add_argument("id", type=int, help="Task ID")
+    p_edit.add_argument("--title", help="New title")
+    p_edit.add_argument("--due", help="New due date (empty string to clear)")
+    p_edit.add_argument("--priority", type=int, choices=[1, 2, 3, 4], help="New priority")
+    p_edit.add_argument("--tag", help="New tag")
+    p_edit.add_argument("--estimate", help="New estimate")
+    p_edit.add_argument("--notes", help="New notes")
+    p_edit.add_argument("--repeat", choices=["none", "daily", "weekly", "monthly"], help="Recurrence")
+
+    # Snooze
+    p_snooze = subparsers.add_parser("snooze", help="Snooze a task deadline")
+    p_snooze.add_argument("id", type=int, help="Task ID")
+    p_snooze.add_argument("duration", nargs="?", default="1h", help="e.g. 15m, 1h, 3h, tomorrow")
+
+    # Done / Toggle
+    p_done = subparsers.add_parser("done", help="Toggle task completed state")
+    p_done.add_argument("id", type=int, help="Task ID")
+
+    # Delete
+    p_del = subparsers.add_parser("del", help="Delete a task")
+    p_del.add_argument("id", type=int, help="Task ID")
+
+    # Clear completed
+    subparsers.add_parser("clear", help="Delete all completed tasks")
+
+    # Stats
+    subparsers.add_parser("stats", help="Show summary statistics")
+
+    # Subtasks
+    p_sub = subparsers.add_parser("sub", help="Manage subtasks")
+    sub_sp = p_sub.add_subparsers(dest="sub_cmd", required=True)
+    p_sub_add = sub_sp.add_parser("add", help="Add subtask to task")
+    p_sub_add.add_argument("id", type=int, help="Task ID")
+    p_sub_add.add_argument("title", help="Subtask title")
+    p_sub_tog = sub_sp.add_parser("toggle", help="Toggle subtask completed state")
+    p_sub_tog.add_argument("id", type=int, help="Subtask ID")
+    p_sub_del = sub_sp.add_parser("del", help="Delete subtask")
+    p_sub_del.add_argument("id", type=int, help="Subtask ID")
+
+    args = parser.parse_args()
+    if not args.command:
+        args.filter = "active"
+        args.tag = None
+        args.sort = "priority"
+        args.jalali = True
+        cmd_list(args)
+        return
+
+    if args.command in ("list", "ls"):
+        cmd_list(args)
+    elif args.command == "add":
+        cmd_add(args)
+    elif args.command == "edit":
+        cmd_edit(args)
+    elif args.command == "snooze":
+        cmd_snooze(args)
+    elif args.command == "done":
+        cmd_done(args)
+    elif args.command == "del":
+        cmd_del(args)
+    elif args.command == "clear":
+        cmd_clear(args)
+    elif args.command == "stats":
+        cmd_stats(args)
+    elif args.command == "sub":
+        cmd_sub(args)
+
+
+if __name__ == "__main__":
+    main()

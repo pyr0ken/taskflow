@@ -1,0 +1,21 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "omid@yaghobi.ir",
+                "Name": "Mohammad Hossein Yaghobi"
+            }
+        ],
+        "Category": "Utilities",
+        "Description": "Raycast/Linear style task and deadline manager with smart countdowns, dual Jalali/Gregorian calendar, recurring tasks, and checklists",
+        "Icon": "view-calendar-tasks",
+        "Id": "org.kde.plasma.taskflow",
+        "Name": "TaskFlow",
+        "Version": "1.1.0"
+    },
+    "Plasmoid": {
+        "Icon": "view-calendar-tasks"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
